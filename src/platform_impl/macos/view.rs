@@ -401,7 +401,7 @@ extern "C" fn marked_range(this: &Object, _sel: Sel) -> NSRange {
         if length > 0 {
             NSRange::new(0, length - 1)
         } else {
-            util::EMPTY_RANGE
+            NSRange::new(0, 0)
         }
     }
 }
@@ -409,7 +409,7 @@ extern "C" fn marked_range(this: &Object, _sel: Sel) -> NSRange {
 extern "C" fn selected_range(_this: &Object, _sel: Sel) -> NSRange {
     trace!("Triggered `selectedRange`");
     trace!("Completed `selectedRange`");
-    util::EMPTY_RANGE
+    NSRange::new(0, 0)
 }
 
 extern "C" fn set_marked_text(
@@ -649,8 +649,6 @@ extern "C" fn key_down(this: &Object, _sel: Sel, event: id) {
         let scancode = get_scancode(event) as u32;
         let virtual_keycode = retrieve_keycode(event);
 
-        let is_repeat = msg_send![event, isARepeat];
-
         update_potentially_stale_modifiers(state, event);
 
         #[allow(deprecated)]
@@ -668,28 +666,20 @@ extern "C" fn key_down(this: &Object, _sel: Sel, event: id) {
             },
         };
 
-        let pass_along = {
-            AppState::queue_event(EventWrapper::StaticEvent(window_event));
-            // Emit `ReceivedCharacter` for key repeats
-            if is_repeat && state.is_key_down {
-                for character in characters.chars().filter(|c| !is_corporate_character(*c)) {
-                    AppState::queue_event(EventWrapper::StaticEvent(Event::WindowEvent {
-                        window_id,
-                        event: WindowEvent::ReceivedCharacter(character),
-                    }));
-                }
-                false
-            } else {
-                true
-            }
-        };
+        let array: id = msg_send![class!(NSArray), arrayWithObject: event];
+        msg_send![this, interpretKeyEvents: array];
 
-        if pass_along {
-            // Some keys (and only *some*, with no known reason) don't trigger `insertText`, while others do...
-            // So, we don't give repeats the opportunity to trigger that, since otherwise our hack will cause some
-            // keys to generate twice as many characters.
-            let array: id = msg_send![class!(NSArray), arrayWithObject: event];
-            let _: () = msg_send![this, interpretKeyEvents: array];
+        AppState::queue_event(EventWrapper::StaticEvent(window_event));
+
+        let is_repeat = msg_send![event, isARepeat];
+        let will_be_handled_by_im: BOOL = msg_send![event, willBeHandledByComplexInputMethod];
+        if is_repeat && state.is_key_down && will_be_handled_by_im == NO {
+            for character in characters.chars().filter(|c| !is_corporate_character(*c)) {
+                AppState::queue_event(EventWrapper::StaticEvent(Event::WindowEvent {
+                    window_id,
+                    event: WindowEvent::ReceivedCharacter(character),
+                }));
+            }
         }
     }
     trace!("Completed `keyDown`");
