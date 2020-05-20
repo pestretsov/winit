@@ -388,7 +388,7 @@ extern "C" fn has_marked_text(this: &Object, _sel: Sel) -> BOOL {
         trace!("Triggered `hasMarkedText`");
         let marked_text: id = *this.get_ivar("markedText");
         trace!("Completed `hasMarkedText`");
-        (marked_text.length() > 0) as i8
+        if marked_text.length() > 0 { YES } else { NO }
     }
 }
 
@@ -396,10 +396,10 @@ extern "C" fn marked_range(this: &Object, _sel: Sel) -> NSRange {
     unsafe {
         trace!("Triggered `markedRange`");
         let marked_text: id = *this.get_ivar("markedText");
-        let length = marked_text.length();
+        let length: NSUInteger = marked_text.length();
         trace!("Completed `markedRange`");
         if length > 0 {
-            NSRange::new(0, length - 1)
+            NSRange::new(0, length)
         } else {
             NSRange::new(0, 0)
         }
@@ -414,13 +414,14 @@ extern "C" fn selected_range(_this: &Object, _sel: Sel) -> NSRange {
 
 extern "C" fn set_marked_text(
     this: &mut Object,
-    _sel: Sel,
+    sel: Sel,
     string: id,
     _selected_range: NSRange,
-    _replacement_range: NSRange,
+    replacement_range: NSRange,
 ) {
     trace!("Triggered `setMarkedText`");
     unsafe {
+        insert_text_inner(this, string);
         let marked_text_ref: &mut id = this.get_mut_ivar("markedText");
         let _: () = msg_send![(*marked_text_ref), release];
         let marked_text = NSMutableAttributedString::alloc(nil);
@@ -439,8 +440,9 @@ extern "C" fn unmark_text(this: &Object, _sel: Sel) {
     trace!("Triggered `unmarkText`");
     unsafe {
         let marked_text: id = *this.get_ivar("markedText");
-        let mutable_string = marked_text.mutableString();
-        let _: () = msg_send![mutable_string, setString:""];
+        let mutable_string: id = marked_text.mutableString();
+        let empty = NSString::init_str(NSString::alloc(nil), "");
+        let _: () = msg_send![mutable_string, setString: empty];
         let input_context: id = msg_send![this, inputContext];
         let _: () = msg_send![input_context, discardMarkedText];
     }
@@ -497,6 +499,14 @@ extern "C" fn first_rect_for_character_range(
 extern "C" fn insert_text(this: &Object, _sel: Sel, string: id, _replacement_range: NSRange) {
     trace!("Triggered `insertText`");
     unsafe {
+        insert_text_inner(this, string);
+        msg_send![this, unmarkText];
+    }
+    trace!("Completed `insertText`");
+}
+
+fn insert_text_inner(this: &Object, string: *mut Object) {
+    unsafe {
         let state_ptr: *mut c_void = *this.get_ivar("winitState");
         let state = &mut *(state_ptr as *mut ViewState);
 
@@ -512,12 +522,34 @@ extern "C" fn insert_text(this: &Object, _sel: Sel, string: id, _replacement_ran
         let slice =
             slice::from_raw_parts(characters.UTF8String() as *const c_uchar, characters.len());
         let string = str::from_utf8_unchecked(slice);
-        state.is_key_down = true;
-
-        // We don't need this now, but it's here if that changes.
-        //let event: id = msg_send![NSApp(), currentEvent];
-
-        let mut events = VecDeque::with_capacity(characters.len());
+        let event: id = msg_send![NSApp(), currentEvent];
+        let marked_text: id = *this.get_ivar("markedText");
+        let trim: usize;
+        if marked_text.length() > 0 || !state.is_key_down {
+            trim = 1;
+        } else {
+            trim = 0;
+        }
+        let mut events = VecDeque::with_capacity(characters.len() + trim as usize);
+        #[allow(deprecated)]
+        if trim > 0 {
+            // it's better to send marked text as a special event so the client will be able to
+            // highlight the symbol and handle next insert with removal
+            // instead we send it as a regular keyboard input and just trim it here
+            events.push_back(EventWrapper::StaticEvent(Event::WindowEvent {
+                window_id: WindowId(get_window_id(state.ns_window)),
+                event: WindowEvent::KeyboardInput {
+                    device_id: DEVICE_ID,
+                    input: KeyboardInput {
+                        state: ElementState::Pressed,
+                        scancode: 0x08,
+                        virtual_keycode: Some(VirtualKeyCode::Back),
+                        modifiers: event_mods(event),
+                    },
+                    is_synthetic: true,
+                },
+            }));
+        }
         for character in string.chars().filter(|c| !is_corporate_character(*c)) {
             events.push_back(EventWrapper::StaticEvent(Event::WindowEvent {
                 window_id: WindowId(get_window_id(state.ns_window)),
@@ -527,7 +559,6 @@ extern "C" fn insert_text(this: &Object, _sel: Sel, string: id, _replacement_ran
 
         AppState::queue_events(events);
     }
-    trace!("Completed `insertText`");
 }
 
 extern "C" fn do_command_by_selector(this: &Object, _sel: Sel, command: Sel) {
@@ -665,15 +696,19 @@ extern "C" fn key_down(this: &Object, _sel: Sel, event: id) {
                 is_synthetic: false,
             },
         };
-
+        let is_repeat: BOOL = msg_send![event, isARepeat];
+        let responds_to_im: BOOL = msg_send![event, respondsToSelector: sel!(willBeHandledByComplexInputMethod)];
+        let will_be_handled_by_im: BOOL =
+            if responds_to_im == YES { msg_send![event, willBeHandledByComplexInputMethod] }
+            else { NO };
+        let was_key_down = state.is_key_down;
+        state.is_key_down = is_repeat == NO && will_be_handled_by_im == NO;
         let array: id = msg_send![class!(NSArray), arrayWithObject: event];
         msg_send![this, interpretKeyEvents: array];
 
         AppState::queue_event(EventWrapper::StaticEvent(window_event));
 
-        let is_repeat = msg_send![event, isARepeat];
-        let will_be_handled_by_im: BOOL = msg_send![event, willBeHandledByComplexInputMethod];
-        if is_repeat && state.is_key_down && will_be_handled_by_im == NO {
+        if state.is_key_down && was_key_down {
             for character in characters.chars().filter(|c| !is_corporate_character(*c)) {
                 AppState::queue_event(EventWrapper::StaticEvent(Event::WindowEvent {
                     window_id,
