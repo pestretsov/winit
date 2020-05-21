@@ -702,13 +702,13 @@ extern "C" fn key_down(this: &Object, _sel: Sel, event: id) {
             if responds_to_im == YES { msg_send![event, willBeHandledByComplexInputMethod] }
             else { NO };
         let was_key_down = state.is_key_down;
-        state.is_key_down = is_repeat == NO && will_be_handled_by_im == NO;
+        state.is_key_down = will_be_handled_by_im == NO;
         let array: id = msg_send![class!(NSArray), arrayWithObject: event];
         msg_send![this, interpretKeyEvents: array];
 
         AppState::queue_event(EventWrapper::StaticEvent(window_event));
 
-        if state.is_key_down && was_key_down {
+        if is_repeat == YES && will_be_handled_by_im == NO {
             for character in characters.chars().filter(|c| !is_corporate_character(*c)) {
                 AppState::queue_event(EventWrapper::StaticEvent(Event::WindowEvent {
                     window_id,
