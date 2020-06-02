@@ -706,7 +706,9 @@ extern "C" fn key_down(this: &Object, _sel: Sel, event: id) {
         let array: id = msg_send![class!(NSArray), arrayWithObject: event];
         msg_send![this, interpretKeyEvents: array];
 
-        AppState::queue_event(EventWrapper::StaticEvent(window_event));
+        if (will_be_handled_by_im == NO) {
+            AppState::queue_event(EventWrapper::StaticEvent(window_event));
+        }
 
         if is_repeat == YES && will_be_handled_by_im == NO {
             for character in characters.chars().filter(|c| !is_corporate_character(*c)) {
