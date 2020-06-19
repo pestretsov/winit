@@ -500,7 +500,7 @@ extern "C" fn insert_text(this: &Object, _sel: Sel, string: id, _replacement_ran
     trace!("Triggered `insertText`");
     unsafe {
         insert_text_inner(this, string);
-        msg_send![this, unmarkText];
+        let _: () = msg_send![this, unmarkText];
     }
     trace!("Completed `insertText`");
 }
@@ -704,7 +704,7 @@ extern "C" fn key_down(this: &Object, _sel: Sel, event: id) {
         let was_key_down = state.is_key_down;
         state.is_key_down = will_be_handled_by_im == NO;
         let array: id = msg_send![class!(NSArray), arrayWithObject: event];
-        msg_send![this, interpretKeyEvents: array];
+        let _: () = msg_send![this, interpretKeyEvents: array];
 
         if (will_be_handled_by_im == NO) {
             AppState::queue_event(EventWrapper::StaticEvent(window_event));
