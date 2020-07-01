@@ -15,7 +15,7 @@ use objc::{
 };
 
 use crate::{
-    dpi::LogicalSize,
+    dpi::{LogicalPosition, LogicalSize},
     event::{Event, ModifiersState, WindowEvent},
     platform_impl::platform::{
         app_state::AppState,
@@ -108,11 +108,12 @@ impl WindowDelegateState {
     fn emit_move_event(&mut self) {
         let rect = unsafe { NSWindow::frame(*self.ns_window) };
         let x = rect.origin.x as f64;
-        let y = util::bottom_left_to_top_left(rect);
+        let y = util::bottom_left_to_top_left(rect) as f64;
         let moved = self.previous_position != Some((x, y));
         if moved {
             self.previous_position = Some((x, y));
-            self.emit_event(WindowEvent::Moved((x, y).into()));
+            let position = LogicalPosition::new(x, y).to_physical(self.get_scale_factor());
+            self.emit_event(WindowEvent::Moved(position));
         }
     }
 
