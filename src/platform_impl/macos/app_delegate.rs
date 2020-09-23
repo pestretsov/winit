@@ -5,6 +5,9 @@ use objc::{
     runtime::{Class, Object, Sel},
 };
 use std::os::raw::c_void;
+use crate::platform_impl::platform::event::EventWrapper;
+use crate::event::Event::OpenFilesEvent;
+use std::path::Path;
 
 pub struct AppDelegateClass(pub *const Class);
 unsafe impl Send for AppDelegateClass {}
@@ -34,6 +37,11 @@ lazy_static! {
         decl.add_method(
             sel!(activationHackMouseMoved:),
             activation_hack::mouse_moved as extern "C" fn(&Object, Sel, id),
+        );
+
+        decl.add_method(
+            sel!(application:openFiles:),
+            open_files as extern "C" fn(&Object, Sel, id, id)
         );
 
         AppDelegateClass(decl.register())
@@ -78,4 +86,29 @@ extern "C" fn did_resign_active(this: &Object, _: Sel, _: id) {
         activation_hack::refocus(this);
     }
     trace!("Completed `applicationDidResignActive`");
+}
+
+extern "C" fn open_files(_this: &Object, _: Sel, app: id, files: id) {
+    trace!("Triggered `application:openFiles:`");
+    use cocoa::foundation::NSFastEnumeration;
+
+    let mut paths: Vec<String> = Vec::new();
+    for file in unsafe { files.iter() } {
+        use cocoa::foundation::NSString;
+        use std::ffi::CStr;
+        unsafe {
+            let utf8string = NSString::UTF8String(file);
+            let str = CStr::from_ptr(utf8string).to_string_lossy().into_owned();
+            if Path::new(&str).exists() {
+                paths.push(str)
+            }
+        }
+    }
+    if paths.is_empty() {
+        let _: () = unsafe { msg_send![app, replyToOpenOrPrint:1] };
+    } else {
+        let _: () = unsafe { msg_send![app, replyToOpenOrPrint:0] };
+        AppState::queue_event(EventWrapper::StaticEvent(OpenFilesEvent(paths)));
+    }
+    trace!("Completed `application:openFiles:`");
 }

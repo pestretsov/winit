@@ -70,6 +70,8 @@ pub enum Event<'a, T: 'static> {
     /// Emitted when an event is sent from [`EventLoopProxy::send_event`](crate::event_loop::EventLoopProxy::send_event)
     UserEvent(T),
 
+    OpenFilesEvent(Vec<String>),
+
     /// Emitted when the application has been suspended.
     Suspended,
 
@@ -134,6 +136,7 @@ impl<T: Clone> Clone for Event<'static, T> {
             NewEvents(cause) => NewEvents(cause.clone()),
             MainEventsCleared => MainEventsCleared,
             RedrawRequested(wid) => RedrawRequested(*wid),
+            OpenFilesEvent(files) => OpenFilesEvent(files.clone()),
             RedrawEventsCleared => RedrawEventsCleared,
             LoopDestroyed => LoopDestroyed,
             Suspended => Suspended,
@@ -152,6 +155,7 @@ impl<'a, T> Event<'a, T> {
             NewEvents(cause) => Ok(NewEvents(cause)),
             MainEventsCleared => Ok(MainEventsCleared),
             RedrawRequested(wid) => Ok(RedrawRequested(wid)),
+            OpenFilesEvent(files) => Ok(OpenFilesEvent(files)),
             RedrawEventsCleared => Ok(RedrawEventsCleared),
             LoopDestroyed => Ok(LoopDestroyed),
             Suspended => Ok(Suspended),
@@ -172,6 +176,7 @@ impl<'a, T> Event<'a, T> {
             NewEvents(cause) => Some(NewEvents(cause)),
             MainEventsCleared => Some(MainEventsCleared),
             RedrawRequested(wid) => Some(RedrawRequested(wid)),
+            OpenFilesEvent(files) => Some(OpenFilesEvent(files)),
             RedrawEventsCleared => Some(RedrawEventsCleared),
             LoopDestroyed => Some(LoopDestroyed),
             Suspended => Some(Suspended),
